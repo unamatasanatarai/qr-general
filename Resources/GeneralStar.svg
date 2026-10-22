@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="badgeGlow" cx="45%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#1E2A3C" />
+      <stop offset="70%" stop-color="#0B111A" />
+      <stop offset="100%" stop-color="#05080E" />
+    </radialGradient>
+    <linearGradient id="goldRim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFF2A8" />
+      <stop offset="25%" stop-color="#D99B16" />
+      <stop offset="50%" stop-color="#FFFDF0" />
+      <stop offset="75%" stop-color="#AA750E" />
+      <stop offset="100%" stop-color="#E5AF28" />
+    </linearGradient>
+    <filter id="subtleShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.6" />
+    </filter>
+    <filter id="starGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+  
+  <!-- Circular Background Shield -->
+  <circle cx="256.0" cy="256.0" r="248.32" fill="url(#badgeGlow)" filter="url(#subtleShadow)" />
+  
+  <!-- Metallic Gold Insignia Ring -->
+  <circle cx="256.0" cy="256.0" r="240.64" fill="none" stroke="url(#goldRim)" stroke-width="13.312" />
+  <circle cx="256.0" cy="256.0" r="222.72" fill="none" stroke="#E5AF28" stroke-width="3.584" stroke-dasharray="8,6" opacity="0.75" />
+  
+  <!-- Upright 5-Pointed Faceted General's Star -->
+  <g filter="url(#starGlow)">    <polygon points="256.0,256.0 214.61389931762642,199.0369192619813 256.0,71.68" fill="#FFF8CC" stroke="#FFF8CC" stroke-width="0.4" />    <polygon points="256.0,256.0 256.0,71.68 297.3861006823736,199.0369192619813" fill="#DCA418" stroke="#DCA418" stroke-width="0.4" />    <polygon points="256.0,256.0 297.3861006823736,199.0369192619813 431.2987370835227,199.0419875968097" fill="#E8B223" stroke="#E8B223" stroke-width="0.4" />    <polygon points="256.0,256.0 431.2987370835227,199.0419875968097 322.96411756590567,277.7579607380187" fill="#9E6C05" stroke="#9E6C05" stroke-width="0.4" />    <polygon points="256.0,256.0 322.96411756590567,277.7579607380187 364.34057770254867,405.1180124031903" fill="#6E4700" stroke="#6E4700" stroke-width="0.4" />    <polygon points="256.0,256.0 364.34057770254867,405.1180124031903 256.0,326.41024" fill="#8A5904" stroke="#8A5904" stroke-width="0.4" />    <polygon points="256.0,256.0 256.0,326.41024 147.65942229745139,405.1180124031903" fill="#B8820E" stroke="#B8820E" stroke-width="0.4" />    <polygon points="256.0,256.0 147.65942229745139,405.1180124031903 189.03588243409433,277.7579607380187" fill="#E2AC24" stroke="#E2AC24" stroke-width="0.4" />    <polygon points="256.0,256.0 189.03588243409433,277.7579607380187 80.70126291647728,199.04198759680972" fill="#FAD24A" stroke="#FAD24A" stroke-width="0.4" />    <polygon points="256.0,256.0 80.70126291647728,199.04198759680972 214.61389931762642,199.0369192619813" fill="#FFFFF5" stroke="#FFFFF5" stroke-width="0.4" />  </g>
+</svg>
