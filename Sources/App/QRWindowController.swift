@@ -41,10 +41,20 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
     public let previewView = PreviewImageView()
     private let previewContainer = NSView()
     private let emptyPlaceholderView = NSStackView()
+    private let emptyStarView: NSImageView = {
+        let iv = NSImageView()
+        iv.imageScaling = .scaleProportionallyUpOrDown
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        iv.image = QRWindowController.loadGeneralStar()
+        iv.alphaValue = 0.75
+        return iv
+    }()
+    private let emptyLabel = NSTextField(labelWithString: "")
 
     public let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
     private let saveButton = NSButton(title: "Save PNG…", target: nil, action: nil)
+    private var copyResetWorkItem: DispatchWorkItem?
 
     private var logoImage: CGImage?
     private var currentMatrix: QRMatrix?
@@ -60,15 +70,19 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
     // MARK: - Initialization
 
     public init() {
+        let fixedSize = NSSize(width: 620, height: 400)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 400),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(origin: .zero, size: fixedSize),
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         window.title = AppConfig.appName
-        window.contentMinSize = NSSize(width: 500, height: 320)
-        window.setFrameAutosaveName("QRGeneral_NativeTitle_v5")
+        window.contentMinSize = fixedSize
+        window.contentMaxSize = fixedSize
+        window.minSize = fixedSize
+        window.maxSize = fixedSize
+        window.setFrameAutosaveName("QRGeneral_NativeTitle_v6")
 
         super.init(window: window)
         window.delegate = self
@@ -415,7 +429,7 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
 
         // Elevated QR Canvas
         previewContainer.wantsLayer = true
-        previewContainer.layer?.backgroundColor = NSColor.white.cgColor
+        previewContainer.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
         previewContainer.layer?.cornerRadius = 8
         previewContainer.layer?.shadowColor = NSColor.black.cgColor
         previewContainer.layer?.shadowOpacity = 0.08
@@ -429,17 +443,17 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
         previewContainer.addSubview(previewView)
 
         // Empty state placeholder
-        let emptyIcon = NSTextField(labelWithString: "⬛ ⬜ ⬛")
-        emptyIcon.font = NSFont.systemFont(ofSize: 14)
-        emptyIcon.textColor = .tertiaryLabelColor
-        let emptyLabel = NSTextField(labelWithString: "QR Preview")
-        emptyLabel.font = NSFont.systemFont(ofSize: 9.5, weight: .medium)
-        emptyLabel.textColor = .tertiaryLabelColor
+        emptyStarView.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        emptyStarView.heightAnchor.constraint(equalToConstant: 72).isActive = true
+
+        emptyLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        emptyLabel.textColor = .secondaryLabelColor
+        emptyLabel.alignment = .center
 
         emptyPlaceholderView.orientation = .vertical
         emptyPlaceholderView.alignment = .centerX
-        emptyPlaceholderView.spacing = 2
-        emptyPlaceholderView.addArrangedSubview(emptyIcon)
+        emptyPlaceholderView.spacing = 6
+        emptyPlaceholderView.addArrangedSubview(emptyStarView)
         emptyPlaceholderView.addArrangedSubview(emptyLabel)
         emptyPlaceholderView.translatesAutoresizingMaskIntoConstraints = false
         previewContainer.addSubview(emptyPlaceholderView)
@@ -466,9 +480,12 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
         // Note: statusLabel is intentionally not arranged in rightColumn to eliminate the clutter below the QR
         rightColumn.addArrangedSubview(actionsRow)
 
+        let heightConstraint = previewContainer.heightAnchor.constraint(equalTo: previewContainer.widthAnchor)
+        heightConstraint.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             previewContainer.widthAnchor.constraint(equalTo: rightColumn.widthAnchor),
-            previewContainer.heightAnchor.constraint(equalTo: previewContainer.widthAnchor),
+            heightConstraint,
 
             previewView.leadingAnchor.constraint(equalTo: previewContainer.leadingAnchor, constant: 6),
             previewView.trailingAnchor.constraint(equalTo: previewContainer.trailingAnchor, constant: -6),
@@ -519,21 +536,42 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
         logoScaleLabel.stringValue = "\(Int(logoSlider.doubleValue.rounded()))%"
 
         currentMatrix = nil
-        previewView.image = nil
 
         do {
             guard let size = requestedSize else { throw QRError.invalidSize }
             let matrix = try QRRenderer.matrix(for: text, correction: correction)
-            let preview = try QRRenderer.render(matrix, options: renderOptions(size: min(size, Self.previewMaxSize)))
-            if size > Self.previewMaxSize {
-                _ = try QRRenderer.render(matrix, options: QRRenderOptions(size: size))
-            }
+            let minAllowed = matrix.count + 8
+            guard size >= minAllowed else { throw QRError.sizeTooSmall(minimum: minAllowed) }
+
+            let previewSize = min(size, Self.previewMaxSize)
+            let preview = try QRRenderer.render(matrix, options: renderOptions(size: previewSize))
             currentMatrix = matrix
             previewView.image = NSImage(cgImage: preview, size: .zero)
+            previewContainer.layer?.backgroundColor = NSColor.white.cgColor
             emptyPlaceholderView.isHidden = true
+            emptyLabel.isHidden = true
+            emptyLabel.stringValue = ""
             statusLabel.stringValue = ""
         } catch {
+            previewView.image = nil
+            previewContainer.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
             emptyPlaceholderView.isHidden = false
+            if text.isEmpty {
+                emptyLabel.isHidden = true
+                emptyLabel.stringValue = ""
+            } else {
+                emptyLabel.isHidden = false
+                if let qrErr = error as? QRError {
+                    switch qrErr {
+                    case .textTooLong: emptyLabel.stringValue = "Text Exceeds Capacity"
+                    case .invalidSize: emptyLabel.stringValue = "Invalid Size"
+                    case .sizeTooSmall: emptyLabel.stringValue = "Size Too Small"
+                    default: emptyLabel.stringValue = "Render Failed"
+                    }
+                } else {
+                    emptyLabel.stringValue = "Render Failed"
+                }
+            }
             statusLabel.stringValue = ""
         }
 
@@ -548,9 +586,13 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     public static func pngData(for image: CGImage) -> Data? {
-        let bitmap = NSBitmapImageRep(cgImage: image)
-        bitmap.size = NSSize(width: image.width, height: image.height)
-        return bitmap.representation(using: .png, properties: [:])
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, UTType.png.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
     }
 
     // MARK: - Actions
@@ -568,6 +610,8 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
             case 4096: sizePresets.selectedSegment = 3
             default: sizePresets.selectedSegment = -1
             }
+        } else {
+            sizePresets.selectedSegment = -1
         }
         regenerate()
     }
@@ -607,16 +651,30 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
             errorPills.selectedSegment = idx
             updateErrorHelpLabel(for: correction)
         }
+        logoScaleLabel.stringValue = "\(Int(logoSlider.doubleValue.rounded()))%"
+
+        // Fast path: if only logo slider moved and we already have a valid matrix, re-render preview directly
+        if let slider = sender as? NSSlider, slider === logoSlider, let matrix = currentMatrix, let size = requestedSize {
+            if let preview = try? QRRenderer.render(matrix, options: renderOptions(size: min(size, Self.previewMaxSize))) {
+                previewView.image = NSImage(cgImage: preview, size: .zero)
+                emptyPlaceholderView.isHidden = true
+                return
+            }
+        }
+
         regenerate()
     }
 
     @objc private func clearText(_ sender: Any?) {
-        textView.string = ""
-        regenerate()
+        guard let textStorage = textView.textStorage, textStorage.length > 0 else { return }
+        if textView.shouldChangeText(in: NSRange(location: 0, length: textStorage.length), replacementString: "") {
+            textView.replaceCharacters(in: NSRange(location: 0, length: textStorage.length), with: "")
+            textView.didChangeText()
+        }
     }
 
     @objc public func chooseLogo(_ sender: Any?) {
-        guard let window = window else { return }
+        guard let window = window, window.attachedSheet == nil else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
@@ -624,7 +682,9 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
             guard let image = NSImage(contentsOf: url) else {
-                self?.showError(message: "Could not open \(url.lastPathComponent) as an image.")
+                DispatchQueue.main.async {
+                    self?.showError(message: "Could not open \(url.lastPathComponent) as an image.")
+                }
                 return
             }
             self?.setLogo(image)
@@ -680,12 +740,52 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
         }
     }
 
+    private static func loadGeneralStar() -> NSImage? {
+        if let image = NSImage(named: NSImage.Name("GeneralStar")) {
+            return image
+        }
+        if let url = Bundle.main.url(forResource: "GeneralStar", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        if let url = Bundle.main.url(forResource: "GeneralStar", withExtension: "svg"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        for path in ["Resources/GeneralStar.png", "Resources/GeneralStar.svg"] {
+            if let image = NSImage(contentsOfFile: path) {
+                return image
+            }
+        }
+        return nil
+    }
+
     private static func rasterizedLogo(from image: NSImage) -> CGImage? {
         let size = image.size
         guard size.width > 0, size.height > 0 else { return nil }
-        let scale = logoRasterSize / max(size.width, size.height)
-        var rect = NSRect(x: 0, y: 0, width: size.width * scale, height: size.height * scale)
-        return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+        var rect = NSRect(origin: .zero, size: size)
+        if let direct = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) {
+            return direct
+        }
+        let width = Int(min(size.width, logoRasterSize))
+        let height = Int(min(size.height, logoRasterSize))
+        guard width > 0, height > 0 else { return nil }
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+        let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height))
+        NSGraphicsContext.restoreGraphicsState()
+        return context.makeImage()
     }
 
     @objc public func copyQRCode(_ sender: Any?) {
@@ -697,16 +797,19 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
             pasteboard.setData(png, forType: .png)
             pasteboard.setData(NSBitmapImageRep(cgImage: image).tiffRepresentation, forType: .tiff)
             copyButton.title = "✓ Copied!"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            copyResetWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
                 self?.copyButton.title = "Copy"
             }
+            copyResetWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: workItem)
         } catch {
             showError(message: error.localizedDescription)
         }
     }
 
     @objc public func saveQRCode(_ sender: Any?) {
-        guard let window = window, hasQRCode else { return }
+        guard let window = window, hasQRCode, window.attachedSheet == nil else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.nameFieldStringValue = "QR Code.png"
@@ -716,7 +819,9 @@ public final class QRWindowController: NSWindowController, NSWindowDelegate, NST
                 guard let png = Self.pngData(for: try self.renderFullSize()) else { throw QRError.renderFailed }
                 try png.write(to: url, options: .atomic)
             } catch {
-                self.showError(message: error.localizedDescription)
+                DispatchQueue.main.async {
+                    self.showError(message: error.localizedDescription)
+                }
             }
         }
     }
@@ -754,10 +859,18 @@ public final class CompactCardView: NSView {
         setup()
     }
 
+    public override var wantsUpdateLayer: Bool {
+        return true
+    }
+
     private func setup() {
         wantsLayer = true
         layer?.cornerRadius = 6
         layer?.masksToBounds = true
+    }
+
+    public override func updateLayer() {
+        super.updateLayer()
         layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.65).cgColor
         layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.40).cgColor
         layer?.borderWidth = 1.0

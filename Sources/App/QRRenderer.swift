@@ -51,7 +51,9 @@ public struct QRMatrix {
         self.modules = modules
     }
 
+    @inline(__always)
     public subscript(row: Int, column: Int) -> Bool {
+        guard row >= 0, row < count, column >= 0, column < count else { return false }
         return modules[row * count + column]
     }
 }
@@ -91,32 +93,43 @@ public enum QRRenderer {
         let extent = output.extent.integral
         let width = Int(extent.width)
         let height = Int(extent.height)
+        guard width > 0, height > 0 else { throw QRError.renderFailed }
+
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         ciContext.render(output, toBitmap: &pixels, rowBytes: width * 4, bounds: extent, format: .RGBA8, colorSpace: nil)
 
-        func isDark(_ x: Int, _ y: Int) -> Bool {
-            return pixels[(y * width + x) * 4] < 128
-        }
-
         // Core Image adds its own margin; crop to the dark modules so we control the quiet zone.
-        var minX = width, minY = height, maxX = -1, maxY = -1
-        for y in 0..<height {
-            for x in 0..<width where isDark(x, y) {
-                minX = min(minX, x)
-                maxX = max(maxX, x)
-                minY = min(minY, y)
-                maxY = max(maxY, y)
-            }
-        }
-        let count = maxX - minX + 1
-        guard maxX >= 0, count == maxY - minY + 1 else { throw QRError.renderFailed }
+        let (count, modules): (Int, [Bool]) = try pixels.withUnsafeBufferPointer { ptr in
+            guard let baseAddress = ptr.baseAddress else { throw QRError.renderFailed }
 
-        var modules = [Bool](repeating: false, count: count * count)
-        for row in 0..<count {
-            for column in 0..<count {
-                modules[row * count + column] = isDark(minX + column, minY + row)
+            @inline(__always)
+            func isDark(_ x: Int, _ y: Int) -> Bool {
+                return baseAddress[(y * width + x) * 4] < 128
             }
+
+            var minX = width, minY = height, maxX = -1, maxY = -1
+            for y in 0..<height {
+                for x in 0..<width where isDark(x, y) {
+                    minX = min(minX, x)
+                    maxX = max(maxX, x)
+                    minY = min(minY, y)
+                    maxY = max(maxY, y)
+                }
+            }
+            let count = maxX - minX + 1
+            guard maxX >= 0, count == maxY - minY + 1 else { throw QRError.renderFailed }
+
+            var modules = [Bool](repeating: false, count: count * count)
+            for row in 0..<count {
+                let rowOffset = row * count
+                let yOffset = (minY + row) * width
+                for column in 0..<count {
+                    modules[rowOffset + column] = baseAddress[(yOffset + minX + column) * 4] < 128
+                }
+            }
+            return (count, modules)
         }
+
         return QRMatrix(count: count, modules: modules)
     }
 
@@ -154,6 +167,10 @@ public enum QRRenderer {
 
         context.setShouldAntialias(false)
         context.setFillColor(black)
+
+        var rects = [CGRect]()
+        rects.reserveCapacity(matrix.count * 4)
+
         for row in 0..<matrix.count {
             let top = edge(quietZone + row)
             let bottom = edge(quietZone + row + 1)
@@ -170,14 +187,16 @@ public enum QRRenderer {
                 let left = edge(quietZone + start)
                 let right = edge(quietZone + column)
                 // Core Graphics has its origin at the bottom left.
-                context.fill(CGRect(x: left, y: side - bottom, width: right - left, height: bottom - top))
+                rects.append(CGRect(x: left, y: side - bottom, width: right - left, height: bottom - top))
             }
         }
+        context.fill(rects)
 
         if let logo = options.logo {
             let symbolStart = edge(quietZone)
             let symbolEnd = edge(quietZone + matrix.count)
-            let scale = min(max(options.logoScale, logoScaleRange.lowerBound), logoScaleRange.upperBound)
+            let rawScale = options.logoScale.isFinite ? options.logoScale : 0.30
+            let scale = min(max(rawScale, logoScaleRange.lowerBound), logoScaleRange.upperBound)
             let backdropSide = ((symbolEnd - symbolStart) * scale).rounded()
             let center = (symbolStart + symbolEnd) / 2
             let backdrop = CGRect(
@@ -197,7 +216,7 @@ public enum QRRenderer {
             let box = backdrop.insetBy(dx: backdropSide * 0.05, dy: backdropSide * 0.05)
             let logoWidth = CGFloat(logo.width)
             let logoHeight = CGFloat(logo.height)
-            if logoWidth > 0 && logoHeight > 0 {
+            if logoWidth.isFinite && logoHeight.isFinite && logoWidth > 0 && logoHeight > 0 && box.width > 0 && box.height > 0 {
                 let fit = min(box.width / logoWidth, box.height / logoHeight)
                 let drawSize = CGSize(width: logoWidth * fit, height: logoHeight * fit)
                 context.draw(logo, in: CGRect(

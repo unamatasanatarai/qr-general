@@ -110,5 +110,30 @@ public enum QRRendererTests {
             controller.regenerate()
             assert(!controller.hasQRCode, "Invalid size disables output")
         }
+
+        testRunner("Matrix subscript out of bounds safely returns false without crashing") {
+            let matrix = try QRRenderer.matrix(for: url, correction: .high)
+            assert(!matrix[-1, 0], "Negative row should return false")
+            assert(!matrix[0, -1], "Negative column should return false")
+            assert(!matrix[matrix.count, 0], "Row >= count should return false")
+            assert(!matrix[0, matrix.count], "Column >= count should return false")
+            assert(!matrix[9999, 9999], "Far out of bounds should return false")
+        }
+
+        testRunner("Adversarial logo scale (NaN, infinite, negative) renders safely") {
+            let logo = makeLogo()
+            for scale in [CGFloat.nan, CGFloat.infinity, -1.0, 99.0] {
+                let options = QRRenderOptions(logo: logo, logoScale: scale)
+                let image = try QRRenderer.render(text: url, correction: .high, options: options)
+                assert(image.width == 1000 && image.height == 1000, "Render with scale \(scale) should produce valid image")
+            }
+        }
+
+        testRunner("Multibyte Unicode and emoji characters encode and decode accurately") {
+            let emojiText = "🌟 QR Code with 🚀 emojis and ñ, ü, 日本語, 🍺"
+            let image = try QRRenderer.render(text: emojiText, correction: .quartile, options: QRRenderOptions())
+            let decoded = decode(image)
+            assert(decoded == emojiText, "Decoded '\(decoded ?? "nil")' should match '\(emojiText)'")
+        }
     }
 }
